@@ -1,0 +1,314 @@
+--[[
+	ANTI-FLING PREMIUM
+	- Un seul bouton en bas à droite (s'adapte à la résolution)
+	- RightControl : masquer / afficher le bouton
+	- Protection : collisions coupées avec les autres, vitesse/rotation folles annulées,
+	  détection des flingers proches, compteur d'attaques bloquées
+	- Aucune téléportation en arrière, véhicules et boost de vitesse respectés
+]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local UIS = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+
+local lp = Players.LocalPlayer
+local HAUTEUR_REF = 1450
+
+-- ===== Nettoyage d'une ancienne instance =====
+pcall(function()
+	local env = getgenv and getgenv() or _G
+	if env.__ANTIFLING_CLEAN then env.__ANTIFLING_CLEAN() end
+end)
+
+local conns = {}
+local function lier(c) table.insert(conns, c) return c end
+
+-- ===== État =====
+local actif = false
+local bloques = 0
+local modifies = setmetatable({}, { __mode = "k" }) -- parts dont on a coupé la collision
+local dernierAlert = {}
+local DENSE = PhysicalProperties.new(60, 0.3, 0, 1, 1)
+
+-- ===== Interface =====
+local parentGui = (gethui and gethui()) or game:GetService("CoreGui")
+local gui = Instance.new("ScreenGui")
+gui.Name = "AntiFlingPremium"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.DisplayOrder = 999
+local okParent = pcall(function() gui.Parent = parentGui end)
+if not okParent or not gui.Parent then gui.Parent = lp:WaitForChild("PlayerGui") end
+
+local scale = Instance.new("UIScale", gui)
+local function majScale()
+	local cam = Workspace.CurrentCamera
+	if cam then scale.Scale = math.clamp(cam.ViewportSize.Y / HAUTEUR_REF, 0.5, 3) end
+end
+majScale()
+if Workspace.CurrentCamera then
+	lier(Workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(majScale))
+end
+
+local VIOLET = Color3.fromRGB(150, 70, 255)
+local ROSE = Color3.fromRGB(255, 80, 200)
+local FOND = Color3.fromRGB(14, 12, 22)
+local GRIS = Color3.fromRGB(120, 118, 140)
+local VERT = Color3.fromRGB(90, 255, 160)
+
+local root = Instance.new("TextButton")
+root.Name = "Bouton"
+root.Text = ""
+root.AutoButtonColor = false
+root.Size = UDim2.fromOffset(270, 60)
+root.AnchorPoint = Vector2.new(1, 1)
+root.Position = UDim2.new(1, -24, 1, 60) -- hors écran, animé à l'ouverture
+root.BackgroundColor3 = FOND
+root.BackgroundTransparency = 0.05
+root.BorderSizePixel = 0
+root.Parent = gui
+Instance.new("UICorner", root).CornerRadius = UDim.new(0, 16)
+
+local stroke = Instance.new("UIStroke", root)
+stroke.Thickness = 2
+stroke.Color = Color3.new(1, 1, 1)
+local grad = Instance.new("UIGradient", stroke)
+grad.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, VIOLET),
+	ColorSequenceKeypoint.new(0.5, ROSE),
+	ColorSequenceKeypoint.new(1, VIOLET),
+})
+
+local fondGrad = Instance.new("UIGradient", root)
+fondGrad.Rotation = 90
+fondGrad.Color = ColorSequence.new(Color3.fromRGB(26, 20, 44), FOND)
+
+local pastille = Instance.new("Frame", root)
+pastille.Size = UDim2.fromOffset(12, 12)
+pastille.AnchorPoint = Vector2.new(0, 0.5)
+pastille.Position = UDim2.new(0, 18, 0.5, 0)
+pastille.BackgroundColor3 = GRIS
+pastille.BorderSizePixel = 0
+Instance.new("UICorner", pastille).CornerRadius = UDim.new(1, 0)
+
+local titre = Instance.new("TextLabel", root)
+titre.BackgroundTransparency = 1
+titre.Position = UDim2.new(0, 40, 0, 9)
+titre.Size = UDim2.new(1, -140, 0, 24)
+titre.Font = Enum.Font.GothamBold
+titre.TextSize = 18
+titre.TextXAlignment = Enum.TextXAlignment.Left
+titre.TextColor3 = Color3.new(1, 1, 1)
+titre.Text = "ANTI-FLING"
+
+local sous = Instance.new("TextLabel", root)
+sous.BackgroundTransparency = 1
+sous.Position = UDim2.new(0, 40, 0, 33)
+sous.Size = UDim2.new(1, -140, 0, 18)
+sous.Font = Enum.Font.Gotham
+sous.TextSize = 13
+sous.TextXAlignment = Enum.TextXAlignment.Left
+sous.TextColor3 = GRIS
+sous.Text = "Désactivé"
+
+local pilule = Instance.new("Frame", root)
+pilule.Size = UDim2.fromOffset(46, 24)
+pilule.AnchorPoint = Vector2.new(1, 0.5)
+pilule.Position = UDim2.new(1, -46, 0.5, 0)
+pilule.BackgroundColor3 = Color3.fromRGB(40, 38, 58)
+pilule.BorderSizePixel = 0
+Instance.new("UICorner", pilule).CornerRadius = UDim.new(1, 0)
+
+local bouton = Instance.new("Frame", pilule)
+bouton.Size = UDim2.fromOffset(18, 18)
+bouton.AnchorPoint = Vector2.new(0, 0.5)
+bouton.Position = UDim2.new(0, 3, 0.5, 0)
+bouton.BackgroundColor3 = Color3.new(1, 1, 1)
+bouton.BorderSizePixel = 0
+Instance.new("UICorner", bouton).CornerRadius = UDim.new(1, 0)
+
+-- Petite croix rouge : ferme complètement le script
+local croix = Instance.new("TextButton", root)
+croix.Name = "Fermer"
+croix.Size = UDim2.fromOffset(22, 22)
+croix.AnchorPoint = Vector2.new(1, 0.5)
+croix.Position = UDim2.new(1, -12, 0.5, 0)
+croix.BackgroundColor3 = Color3.fromRGB(220, 50, 60)
+croix.AutoButtonColor = false
+croix.BorderSizePixel = 0
+croix.Text = "✕"
+croix.Font = Enum.Font.GothamBold
+croix.TextSize = 12
+croix.TextColor3 = Color3.new(1, 1, 1)
+Instance.new("UICorner", croix).CornerRadius = UDim.new(1, 0)
+
+local function tween(obj, t, props, style)
+	TweenService:Create(obj, TweenInfo.new(t, style or Enum.EasingStyle.Quint, Enum.EasingDirection.Out), props):Play()
+end
+
+local function texteSous()
+	if not actif then return "Désactivé" end
+	return bloques == 0 and "Protégé" or ("Protégé · " .. bloques .. " bloqué" .. (bloques > 1 and "s" or ""))
+end
+
+local function majUI()
+	sous.Text = texteSous()
+	tween(sous, 0.25, { TextColor3 = actif and VERT or GRIS })
+	tween(pastille, 0.25, { BackgroundColor3 = actif and VERT or GRIS })
+	tween(pilule, 0.25, { BackgroundColor3 = actif and VIOLET or Color3.fromRGB(40, 38, 58) })
+	tween(bouton, 0.25, { Position = actif and UDim2.new(1, -21, 0.5, 0) or UDim2.new(0, 3, 0.5, 0) }, Enum.EasingStyle.Back)
+end
+
+local function flash()
+	stroke.Thickness = 4
+	tween(stroke, 0.4, { Thickness = 2 })
+	sous.Text = texteSous()
+end
+
+-- Animation d'entrée
+tween(root, 0.6, { Position = UDim2.new(1, -24, 1, -24) }, Enum.EasingStyle.Back)
+
+-- Survol / clic
+lier(root.MouseEnter:Connect(function() tween(root, 0.2, { Size = UDim2.fromOffset(278, 62) }) end))
+lier(root.MouseLeave:Connect(function() tween(root, 0.2, { Size = UDim2.fromOffset(270, 60) }) end))
+lier(root.MouseButton1Down:Connect(function() tween(root, 0.1, { Size = UDim2.fromOffset(262, 56) }) end))
+lier(root.MouseButton1Up:Connect(function() tween(root, 0.15, { Size = UDim2.fromOffset(278, 62) }) end))
+
+-- Bordure animée quand actif
+lier(RunService.RenderStepped:Connect(function(dt)
+	if actif then grad.Rotation = (grad.Rotation + dt * 90) % 360 end
+end))
+
+-- RightControl : masquer / afficher
+lier(UIS.InputBegan:Connect(function(input, gp)
+	if gp then return end
+	if input.KeyCode == Enum.KeyCode.RightControl then
+		gui.Enabled = not gui.Enabled
+	end
+end))
+
+-- ===== Logique de protection =====
+local function appliquerPoidsPerso(char)
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if hrp then
+		hrp.CustomPhysicalProperties = actif and DENSE or nil
+	end
+end
+
+local function restaurer()
+	for part in pairs(modifies) do
+		if part and part.Parent then part.CanCollide = true end
+	end
+	table.clear(modifies)
+	appliquerPoidsPerso(lp.Character)
+end
+
+local function basculer()
+	actif = not actif
+	if not actif then
+		restaurer()
+	else
+		appliquerPoidsPerso(lp.Character)
+	end
+	majUI()
+end
+lier(root.MouseButton1Click:Connect(basculer))
+
+lier(lp.CharacterAdded:Connect(function(char)
+	task.wait(0.5)
+	appliquerPoidsPerso(char)
+end))
+
+-- 1) Les autres joueurs ne peuvent plus te toucher (collision locale coupée)
+lier(RunService.Stepped:Connect(function()
+	if not actif then return end
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= lp and p.Character then
+			for _, part in ipairs(p.Character:GetDescendants()) do
+				if part:IsA("BasePart") and part.CanCollide then
+					part.CanCollide = false
+					modifies[part] = true
+				end
+			end
+		end
+	end
+end))
+
+-- 2) Annulation des vitesses / rotations folles sur toi (sans téléportation)
+lier(RunService.Heartbeat:Connect(function()
+	if not actif then return end
+	local char = lp.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not hrp or not hum or hum.SeatPart then return end -- véhicules : on ne touche pas
+
+	local v = hrp.AssemblyLinearVelocity
+	local horizontal = Vector3.new(v.X, 0, v.Z).Magnitude
+	local limite = math.max(100, hum.WalkSpeed * 2.5 + 60) -- respecte ton boost de vitesse
+	local rot = hrp.AssemblyAngularVelocity.Magnitude
+
+	if horizontal > limite or rot > 30 or v.Y > 150 then
+		local y = v.Y > 150 and 50 or v.Y -- chute normale conservée
+		local h = Vector3.new(v.X, 0, v.Z)
+		if horizontal > limite then h = h.Unit * math.min(horizontal, hum.WalkSpeed) end
+		hrp.AssemblyLinearVelocity = Vector3.new(h.X, y, h.Z)
+		hrp.AssemblyAngularVelocity = Vector3.zero
+		bloques += 1
+		flash()
+	end
+end))
+
+-- 3) Détection des flingers à proximité (compteur + alerte visuelle)
+task.spawn(function()
+	while gui.Parent do
+		task.wait(0.2)
+		if actif then
+			local char = lp.Character
+			local mon = char and char:FindFirstChild("HumanoidRootPart")
+			if mon then
+				for _, p in ipairs(Players:GetPlayers()) do
+					if p ~= lp and p.Character then
+						local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+						if hrp and (hrp.Position - mon.Position).Magnitude < 40 then
+							local ang = hrp.AssemblyAngularVelocity.Magnitude
+							local vit = hrp.AssemblyLinearVelocity.Magnitude
+							if ang > 60 or vit > 250 then
+								local now = os.clock()
+								if not dernierAlert[p] or now - dernierAlert[p] > 2 then
+									dernierAlert[p] = now
+									bloques += 1
+									flash()
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end)
+
+-- Fermeture complète (croix rouge) + nettoyage à la prochaine exécution
+local function fermer()
+	actif = false
+	restaurer()
+	for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+	pcall(function()
+		local env = getgenv and getgenv() or _G
+		env.__ANTIFLING_CLEAN = nil
+	end)
+	if gui then gui:Destroy() end
+end
+
+lier(croix.MouseEnter:Connect(function() tween(croix, 0.15, { BackgroundColor3 = Color3.fromRGB(255, 80, 90) }) end))
+lier(croix.MouseLeave:Connect(function() tween(croix, 0.15, { BackgroundColor3 = Color3.fromRGB(220, 50, 60) }) end))
+lier(croix.MouseButton1Click:Connect(fermer))
+
+pcall(function()
+	local env = getgenv and getgenv() or _G
+	env.__ANTIFLING_CLEAN = fermer
+end)
+
+majUI()
