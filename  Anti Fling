@@ -1,12 +1,3 @@
---[[
-	ANTI-FLING PREMIUM
-	- Un seul bouton en bas à droite (s'adapte à la résolution)
-	- RightControl : masquer / afficher le bouton
-	- Protection : collisions coupées avec les autres, vitesse/rotation folles annulées,
-	  détection des flingers proches, compteur d'attaques bloquées
-	- Aucune téléportation en arrière, véhicules et boost de vitesse respectés
-]]
-
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
@@ -16,23 +7,30 @@ local Workspace = game:GetService("Workspace")
 local lp = Players.LocalPlayer
 local HAUTEUR_REF = 1450
 
--- ===== Nettoyage d'une ancienne instance =====
 pcall(function()
 	local env = getgenv and getgenv() or _G
 	if env.__ANTIFLING_CLEAN then env.__ANTIFLING_CLEAN() end
 end)
 
+pcall(function()
+	for _, parent in ipairs({ gethui and gethui() or game:GetService("CoreGui"), Players.LocalPlayer:FindFirstChildOfClass("PlayerGui") }) do
+		for _, g in ipairs(parent:GetChildren()) do
+			if g.Name == "AntiFlingPremium" then g:Destroy() end
+		end
+	end
+end)
+
 local conns = {}
 local function lier(c) table.insert(conns, c) return c end
+local fermer
+local ferme = false
 
--- ===== État =====
 local actif = false
 local bloques = 0
-local modifies = setmetatable({}, { __mode = "k" }) -- parts dont on a coupé la collision
+local modifies = setmetatable({}, { __mode = "k" })
 local dernierAlert = {}
 local DENSE = PhysicalProperties.new(60, 0.3, 0, 1, 1)
 
--- ===== Interface =====
 local parentGui = (gethui and gethui()) or game:GetService("CoreGui")
 local gui = Instance.new("ScreenGui")
 gui.Name = "AntiFlingPremium"
@@ -64,7 +62,7 @@ root.Text = ""
 root.AutoButtonColor = false
 root.Size = UDim2.fromOffset(270, 60)
 root.AnchorPoint = Vector2.new(1, 1)
-root.Position = UDim2.new(1, -24, 1, 60) -- hors écran, animé à l'ouverture
+root.Position = UDim2.new(1, -24, 1, 60)
 root.BackgroundColor3 = FOND
 root.BackgroundTransparency = 0.05
 root.BorderSizePixel = 0
@@ -129,7 +127,6 @@ bouton.BackgroundColor3 = Color3.new(1, 1, 1)
 bouton.BorderSizePixel = 0
 Instance.new("UICorner", bouton).CornerRadius = UDim.new(1, 0)
 
--- Séparateur fin avant la croix
 local separateur = Instance.new("Frame", root)
 separateur.Size = UDim2.fromOffset(1, 30)
 separateur.AnchorPoint = Vector2.new(1, 0.5)
@@ -138,7 +135,6 @@ separateur.BackgroundColor3 = Color3.fromRGB(70, 60, 100)
 separateur.BackgroundTransparency = 0.3
 separateur.BorderSizePixel = 0
 
--- Croix rouge premium : vraie croix dessinée (2 barres), pas un caractère texte
 local ROUGE = Color3.fromRGB(235, 60, 75)
 local ROUGE_FONCE = Color3.fromRGB(70, 22, 32)
 local croix = Instance.new("TextButton", root)
@@ -197,21 +193,17 @@ local function flash()
 	sous.Text = texteSous()
 end
 
--- Animation d'entrée
 tween(root, 0.6, { Position = UDim2.new(1, -24, 1, -24) }, Enum.EasingStyle.Back)
 
--- Survol / clic
 lier(root.MouseEnter:Connect(function() tween(root, 0.2, { Size = UDim2.fromOffset(278, 62) }) end))
 lier(root.MouseLeave:Connect(function() tween(root, 0.2, { Size = UDim2.fromOffset(270, 60) }) end))
 lier(root.MouseButton1Down:Connect(function() tween(root, 0.1, { Size = UDim2.fromOffset(262, 56) }) end))
 lier(root.MouseButton1Up:Connect(function() tween(root, 0.15, { Size = UDim2.fromOffset(278, 62) }) end))
 
--- Bordure animée quand actif
 lier(RunService.RenderStepped:Connect(function(dt)
 	if actif then grad.Rotation = (grad.Rotation + dt * 90) % 360 end
 end))
 
--- RightControl : masquer / afficher
 lier(UIS.InputBegan:Connect(function(input, gp)
 	if gp then return end
 	if input.KeyCode == Enum.KeyCode.RightControl then
@@ -219,7 +211,6 @@ lier(UIS.InputBegan:Connect(function(input, gp)
 	end
 end))
 
--- ===== Logique de protection =====
 local function appliquerPoidsPerso(char)
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
 	if hrp then
@@ -251,7 +242,6 @@ lier(lp.CharacterAdded:Connect(function(char)
 	appliquerPoidsPerso(char)
 end))
 
--- 1) Les autres joueurs ne peuvent plus te toucher (collision locale coupée)
 lier(RunService.Stepped:Connect(function()
 	if not actif then return end
 	for _, p in ipairs(Players:GetPlayers()) do
@@ -266,21 +256,20 @@ lier(RunService.Stepped:Connect(function()
 	end
 end))
 
--- 2) Annulation des vitesses / rotations folles sur toi (sans téléportation)
 lier(RunService.Heartbeat:Connect(function()
 	if not actif then return end
 	local char = lp.Character
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if not hrp or not hum or hum.SeatPart then return end -- véhicules : on ne touche pas
+	if not hrp or not hum or hum.SeatPart then return end
 
 	local v = hrp.AssemblyLinearVelocity
 	local horizontal = Vector3.new(v.X, 0, v.Z).Magnitude
-	local limite = math.max(100, hum.WalkSpeed * 2.5 + 60) -- respecte ton boost de vitesse
+	local limite = math.max(100, hum.WalkSpeed * 2.5 + 60)
 	local rot = hrp.AssemblyAngularVelocity.Magnitude
 
 	if horizontal > limite or rot > 30 or v.Y > 150 then
-		local y = v.Y > 150 and 50 or v.Y -- chute normale conservée
+		local y = v.Y > 150 and 50 or v.Y
 		local h = Vector3.new(v.X, 0, v.Z)
 		if horizontal > limite then h = h.Unit * math.min(horizontal, hum.WalkSpeed) end
 		hrp.AssemblyLinearVelocity = Vector3.new(h.X, y, h.Z)
@@ -290,7 +279,6 @@ lier(RunService.Heartbeat:Connect(function()
 	end
 end))
 
--- 3) Détection des flingers à proximité (compteur + alerte visuelle)
 task.spawn(function()
 	while gui.Parent do
 		task.wait(0.2)
@@ -320,17 +308,22 @@ task.spawn(function()
 	end
 end)
 
--- Fermeture complète (croix rouge) + nettoyage à la prochaine exécution
-local function fermer()
+fermer = function()
+	if ferme then return end
+	ferme = true
 	actif = false
 	restaurer()
 	for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
 	pcall(function()
 		local env = getgenv and getgenv() or _G
-		env.__ANTIFLING_CLEAN = nil
+		if env.__ANTIFLING_CLEAN == fermer then env.__ANTIFLING_CLEAN = nil end
 	end)
 	if gui then gui:Destroy() end
 end
+
+lier(RunService.Heartbeat:Connect(function()
+	if not gui.Parent then fermer() end
+end))
 
 lier(croix.MouseEnter:Connect(function()
 	tween(croix, 0.2, { BackgroundColor3 = ROUGE, Size = UDim2.fromOffset(30, 30) })
