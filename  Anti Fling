@@ -96,7 +96,7 @@ Instance.new("UICorner", pastille).CornerRadius = UDim.new(1, 0)
 local titre = Instance.new("TextLabel", root)
 titre.BackgroundTransparency = 1
 titre.Position = UDim2.new(0, 40, 0, 9)
-titre.Size = UDim2.new(1, -140, 0, 24)
+titre.Size = UDim2.new(1, -150, 0, 24)
 titre.Font = Enum.Font.GothamBold
 titre.TextSize = 18
 titre.TextXAlignment = Enum.TextXAlignment.Left
@@ -106,7 +106,7 @@ titre.Text = "ANTI-FLING"
 local sous = Instance.new("TextLabel", root)
 sous.BackgroundTransparency = 1
 sous.Position = UDim2.new(0, 40, 0, 33)
-sous.Size = UDim2.new(1, -140, 0, 18)
+sous.Size = UDim2.new(1, -150, 0, 18)
 sous.Font = Enum.Font.Gotham
 sous.TextSize = 13
 sous.TextXAlignment = Enum.TextXAlignment.Left
@@ -116,7 +116,7 @@ sous.Text = "Désactivé"
 local pilule = Instance.new("Frame", root)
 pilule.Size = UDim2.fromOffset(46, 24)
 pilule.AnchorPoint = Vector2.new(1, 0.5)
-pilule.Position = UDim2.new(1, -46, 0.5, 0)
+pilule.Position = UDim2.new(1, -62, 0.5, 0)
 pilule.BackgroundColor3 = Color3.fromRGB(40, 38, 58)
 pilule.BorderSizePixel = 0
 Instance.new("UICorner", pilule).CornerRadius = UDim.new(1, 0)
@@ -129,20 +129,50 @@ bouton.BackgroundColor3 = Color3.new(1, 1, 1)
 bouton.BorderSizePixel = 0
 Instance.new("UICorner", bouton).CornerRadius = UDim.new(1, 0)
 
--- Petite croix rouge : ferme complètement le script
+-- Séparateur fin avant la croix
+local separateur = Instance.new("Frame", root)
+separateur.Size = UDim2.fromOffset(1, 30)
+separateur.AnchorPoint = Vector2.new(1, 0.5)
+separateur.Position = UDim2.new(1, -50, 0.5, 0)
+separateur.BackgroundColor3 = Color3.fromRGB(70, 60, 100)
+separateur.BackgroundTransparency = 0.3
+separateur.BorderSizePixel = 0
+
+-- Croix rouge premium : vraie croix dessinée (2 barres), pas un caractère texte
+local ROUGE = Color3.fromRGB(235, 60, 75)
+local ROUGE_FONCE = Color3.fromRGB(70, 22, 32)
 local croix = Instance.new("TextButton", root)
 croix.Name = "Fermer"
-croix.Size = UDim2.fromOffset(22, 22)
-croix.AnchorPoint = Vector2.new(1, 0.5)
-croix.Position = UDim2.new(1, -12, 0.5, 0)
-croix.BackgroundColor3 = Color3.fromRGB(220, 50, 60)
+croix.Text = ""
 croix.AutoButtonColor = false
+croix.Size = UDim2.fromOffset(28, 28)
+croix.AnchorPoint = Vector2.new(1, 0.5)
+croix.Position = UDim2.new(1, -14, 0.5, 0)
+croix.BackgroundColor3 = ROUGE_FONCE
 croix.BorderSizePixel = 0
-croix.Text = "✕"
-croix.Font = Enum.Font.GothamBold
-croix.TextSize = 12
-croix.TextColor3 = Color3.new(1, 1, 1)
 Instance.new("UICorner", croix).CornerRadius = UDim.new(1, 0)
+local croixStroke = Instance.new("UIStroke", croix)
+croixStroke.Thickness = 1.5
+croixStroke.Color = ROUGE
+
+local support = Instance.new("Frame", croix)
+support.BackgroundTransparency = 1
+support.Size = UDim2.fromOffset(12, 12)
+support.AnchorPoint = Vector2.new(0.5, 0.5)
+support.Position = UDim2.fromScale(0.5, 0.5)
+
+local barres = {}
+for _, rot in ipairs({ 45, -45 }) do
+	local b = Instance.new("Frame", support)
+	b.Size = UDim2.fromOffset(15, 2)
+	b.AnchorPoint = Vector2.new(0.5, 0.5)
+	b.Position = UDim2.fromScale(0.5, 0.5)
+	b.Rotation = rot
+	b.BackgroundColor3 = Color3.fromRGB(255, 110, 125)
+	b.BorderSizePixel = 0
+	Instance.new("UICorner", b).CornerRadius = UDim.new(1, 0)
+	table.insert(barres, b)
+end
 
 local function tween(obj, t, props, style)
 	TweenService:Create(obj, TweenInfo.new(t, style or Enum.EasingStyle.Quint, Enum.EasingDirection.Out), props):Play()
@@ -302,8 +332,17 @@ local function fermer()
 	if gui then gui:Destroy() end
 end
 
-lier(croix.MouseEnter:Connect(function() tween(croix, 0.15, { BackgroundColor3 = Color3.fromRGB(255, 80, 90) }) end))
-lier(croix.MouseLeave:Connect(function() tween(croix, 0.15, { BackgroundColor3 = Color3.fromRGB(220, 50, 60) }) end))
+lier(croix.MouseEnter:Connect(function()
+	tween(croix, 0.2, { BackgroundColor3 = ROUGE, Size = UDim2.fromOffset(30, 30) })
+	tween(support, 0.3, { Rotation = 90 }, Enum.EasingStyle.Back)
+	for _, b in ipairs(barres) do tween(b, 0.2, { BackgroundColor3 = Color3.new(1, 1, 1) }) end
+end))
+lier(croix.MouseLeave:Connect(function()
+	tween(croix, 0.2, { BackgroundColor3 = ROUGE_FONCE, Size = UDim2.fromOffset(28, 28) })
+	tween(support, 0.3, { Rotation = 0 })
+	for _, b in ipairs(barres) do tween(b, 0.2, { BackgroundColor3 = Color3.fromRGB(255, 110, 125) }) end
+end))
+lier(croix.MouseButton1Down:Connect(function() tween(croix, 0.08, { Size = UDim2.fromOffset(24, 24) }) end))
 lier(croix.MouseButton1Click:Connect(fermer))
 
 pcall(function()
